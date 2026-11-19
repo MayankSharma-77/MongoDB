@@ -1,0 +1,240 @@
+MONGODB PRACTICALS - OUTPUTS (marked by question number)
+Name    : Mayank Sharma
+Roll No : PCEA24CR030
+
+
+############################################################
+SCENARIO B3: MOVIE CATALOGUE - INDEX ORDER, EXPLAIN AND HIDDEN INDEXES
+############################################################
+
+============================================================
+B3-SETUP
+============================================================
+> use movieDB
+switched to db movieDB
+
+> db.movies.insertMany([ ... 8 movie documents ... ])
+{
+  acknowledged: true,
+  insertedIds: { '0': 1, '1': 2, '2': 3, '3': 4, '4': 5, '5': 6, '6': 7, '7': 8 }
+}
+
+============================================================
+B3-1: Explain without an index
+============================================================
+> db.movies.find({ genre: "Drama", rating: { $gte: 8 } }).explain("executionStats")
+
+winningPlan.stage                 : COLLSCAN
+executionStats.nReturned          : 2        (Silent River, Morning Song)
+executionStats.totalDocsExamined  : 8
+
+Result: COLLSCAN reads all 8 documents to return 2.
+
+============================================================
+B3-2: Compound index in the right order (index name: genre_1_rating_-1)
+============================================================
+> db.movies.createIndex({ genre: 1, rating: -1 })
+genre_1_rating_-1
+
+> db.movies.find({ genre: "Drama", rating: { $gte: 8 } }).explain("executionStats")
+
+winningPlan.inputStage.stage      : IXSCAN   (indexName: "genre_1_rating_-1")
+nReturned                         : 2
+totalDocsExamined                 : 2
+totalKeysExamined                 : about 2-3
+
+Note: Equality field (genre) first, range field (rating) second is the
+efficient order for this query.
+
+============================================================
+B3-3: Compare with a poorly ordered index
+============================================================
+> db.movies.createIndex({ rating: 1, genre: 1 })
+rating_1_genre_1
+
+> db.movies.find({ genre: "Drama", rating: { $gte: 8 } }).hint({ genre: 1, rating: -1 }).explain("executionStats")
+
+winningPlan.inputStage.stage      : IXSCAN   (indexName: "genre_1_rating_-1")
+nReturned                         : 2
+totalKeysExamined                 : about 2-3
+
+> db.movies.find({ genre: "Drama", rating: { $gte: 8 } }).hint({ rating: 1, genre: 1 }).explain("executionStats")
+
+winningPlan.inputStage.stage      : IXSCAN   (indexName: "rating_1_genre_1")
+nReturned                         : 2
+totalKeysExamined                 : higher than the well-ordered index
+
+Result: Both queries return the same 2 movies, but the poorly ordered index
+rating_1_genre_1 has to look at every movie rated 8 or more (including the
+Action movie Iron Gate, 8.1) before checking the genre, so totalKeysExamined
+is higher. With only 8 documents the gap is tiny; with millions it is very
+large. Compare the two numbers, not the absolute values.
+
+============================================================
+B3-4: Drop the poorly ordered index
+============================================================
+> db.movies.dropIndex({ rating: 1, genre: 1 })
+{ nIndexesWas: 3, ok: 1 }
+
+============================================================
+B3-5: Multikey index (index name: cast_1)
+============================================================
+> db.movies.createIndex({ cast: 1 })
+cast_1
+
+> db.movies.find({ cast: "Asha" })
+[
+  { _id: 1, title: 'Silent River', genre: 'Drama', rating: 8.4, year: 2019, cast: [ 'Asha', 'Ravi' ] },
+  { _id: 2, title: 'Rapid Chase', genre: 'Action', rating: 7.2, year: 2020, cast: [ 'Vikram', 'Asha' ] },
+  { _id: 5, title: 'Morning Song', genre: 'Drama', rating: 8.8, year: 2022, cast: [ 'Meera', 'Asha' ] },
+  { _id: 8, title: 'Paper Boats', genre: 'Drama', rating: 7.9, year: 2021, cast: [ 'Asha', 'Karan' ] }
+]
+
+> db.movies.find({ cast: "Asha" }).explain("executionStats")
+
+winningPlan.inputStage.stage      : IXSCAN   (indexName: "cast_1")
+isMultiKey                        : true
+nReturned                         : 4        (Silent River, Rapid Chase,
+                                              Morning Song, Paper Boats)
+
+============================================================
+B3-6: Hide and unhide the compound index
+============================================================
+> db.movies.hideIndex("genre_1_rating_-1")
+{ ok: 1 }
+
+> db.movies.find({ genre: "Drama", rating: { $gte: 8 } }).explain("executionStats")
+
+winningPlan.stage                 : COLLSCAN   (hidden index is ignored)
+nReturned                         : 2
+totalDocsExamined                 : 8
+
+> db.movies.unhideIndex("genre_1_rating_-1")
+{ ok: 1 }
+
+============================================================
+B3-7: Same index with a custom name, then list indexes
+============================================================
+> db.movies.createIndex({ genre: 1, rating: -1 }, { name: "my_custom_index" })
+
+MongoServerError: Index already exists with a different name: genre_1_rating_-1
+(IndexOptionsConflict: same key pattern, different name)
+
+> db.movies.getIndexes()
+[
+  { v: 2, key: { _id: 1 }, name: '_id_' },
+  { v: 2, key: { genre: 1, rating: -1 }, name: 'genre_1_rating_-1' },
+  { v: 2, key: { cast: 1 }, name: 'cast_1' }
+]
+
+
+############################################################
+SCENARIO B4: TICKET BOOKING - BACKUP, RESTORE AND DISASTER RECOVERY
+############################################################
+
+============================================================
+B4-SETUP
+============================================================
+> use ticketDB
+switched to db ticketDB
+
+> db.bookings.insertMany([ ... 5 booking documents ... ])
+{
+  acknowledged: true,
+  insertedIds: { '0': 1, '1': 2, '2': 3, '3': 4, '4': 5 }
+}
+
+============================================================
+B4-1: Take a full backup of the replica set
+============================================================
+> exit
+Bye!
+
+C:\> mongodump --uri="mongodb+srv://cluster0.mo5zhuy.mongodb.net/" --username="2024pceacrmayank30_db_user" --readPreference=secondary --oplog --out="C:\backups\ticket_full"
+
+writing ticketDB.bookings to C:\backups\ticket_full\ticketDB\bookings.bson
+done dumping ticketDB.bookings (5 documents)
+writing captured oplog to C:\backups\ticket_full\oplog.bson
+
+Note: The exact log lines depend on the Database Tools version. What matters
+is that every collection reports "done dumping" and no error appears.
+
+============================================================
+B4-2: Verify the backup files
+============================================================
+C:\> dir C:\backups\ticket_full
+
+ ticketDB\            <- folder with the database dump
+ oplog.bson           <- captured oplog
+
+C:\> dir C:\backups\ticket_full\ticketDB
+
+ bookings.bson            <- the data
+ bookings.metadata.json   <- indexes and collection options
+
+============================================================
+B4-3: Simulate a disaster
+============================================================
+> use ticketDB
+switched to db ticketDB
+
+> db.bookings.drop()
+true
+
+> show collections
+(bookings is not listed)
+
+> db.bookings.countDocuments()
+0
+
+Result: The collection no longer exists, so the count is 0. Because the drop
+is replicated, the secondaries lose the data as well. Replication is not a
+backup.
+
+============================================================
+B4-4: Restore only the bookings collection
+============================================================
+> exit
+Bye!
+
+C:\> mongorestore --uri="mongodb+srv://cluster0.mo5zhuy.mongodb.net/" --username="2024pceacrmayank30_db_user" --nsInclude="ticketDB.bookings" "C:\backups\ticket_full"
+
+restoring ticketDB.bookings from C:\backups\ticket_full\ticketDB\bookings.bson
+finished restoring ticketDB.bookings (5 documents, 0 failures)
+5 document(s) restored successfully. 0 document(s) failed to restore.
+
+============================================================
+B4-5: Verify the restored data
+============================================================
+> use ticketDB
+switched to db ticketDB
+
+> db.bookings.countDocuments()
+5
+
+> db.bookings.find({}, { _id: 0 })
+[
+  { passenger: 'Anand',   route: 'Chennai-Madurai',    seats: 2 },
+  { passenger: 'Bhuvana', route: 'Chennai-Coimbatore', seats: 1 },
+  { passenger: 'Chandru', route: 'Madurai-Trichy',     seats: 3 },
+  { passenger: 'Divya',   route: 'Salem-Chennai',      seats: 1 },
+  { passenger: 'Elango',  route: 'Chennai-Trichy',     seats: 2 }
+]
+
+============================================================
+B4-6: Disaster-recovery table and backup practices
+============================================================
+Failure situation                 Recovery action
+-------------------------------   ---------------------------------------------------------
+Accidental deletion               Restore the collection from backup using mongorestore.
+Primary server failure            Replica set elects another member as primary (failover).
+Database corruption               Restore the database from a valid backup.
+Hardware failure                  Replace the hardware and restore the data from backup.
+Accidental data modification      Restore from backup, or use point-in-time recovery if available.
+
+Three good backup practices:
+1. Take regular backups.
+2. Store backup copies in a separate location or in the cloud.
+3. Test backup restoration regularly.
+
+END OF OUTPUTS

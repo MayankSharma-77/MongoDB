@@ -1,0 +1,178 @@
+MONGODB PRACTICALS - COMMANDS
+Name    : Mayank Sharma
+Roll No : PCEA24CR030
+
+Connection (run in CMD, enter your Atlas password when prompted):
+mongosh "mongodb+srv://cluster0.mo5zhuy.mongodb.net/" --apiVersion 1 --username 2024pceacrmayank30_db_user
+
+NOTE: mongodump and mongorestore run in CMD / PowerShell (not inside mongosh).
+      They need the MongoDB Database Tools installed.
+
+############################################################
+SCENARIO B3: MOVIE CATALOGUE - INDEX ORDER, EXPLAIN AND HIDDEN INDEXES
+Database / Collection: movieDB.movies
+############################################################
+
+------------------------------------------------------------
+B3-SETUP: Connect and insert data
+------------------------------------------------------------
+mongosh "mongodb+srv://cluster0.mo5zhuy.mongodb.net/" --apiVersion 1 --username 2024pceacrmayank30_db_user
+
+use movieDB
+
+db.movies.insertMany([
+  { _id: 1, title: "Silent River", genre: "Drama", rating: 8.4, year: 2019,
+    cast: ["Asha", "Ravi"] },
+  { _id: 2, title: "Rapid Chase", genre: "Action", rating: 7.2, year: 2020,
+    cast: ["Vikram", "Asha"] },
+  { _id: 3, title: "Lost Letters", genre: "Drama", rating: 7.1, year: 2018,
+    cast: ["Meera", "Ravi"] },
+  { _id: 4, title: "Iron Gate", genre: "Action", rating: 8.1, year: 2021,
+    cast: ["Vikram", "Karan"] },
+  { _id: 5, title: "Morning Song", genre: "Drama", rating: 8.8, year: 2022,
+    cast: ["Meera", "Asha"] },
+  { _id: 6, title: "Laugh Lane", genre: "Comedy", rating: 6.9, year: 2017,
+    cast: ["Karan", "Meera"] },
+  { _id: 7, title: "Night Heist", genre: "Action", rating: 6.5, year: 2019,
+    cast: ["Vikram", "Ravi"] },
+  { _id: 8, title: "Paper Boats", genre: "Drama", rating: 7.9, year: 2021,
+    cast: ["Asha", "Karan"] }
+])
+
+------------------------------------------------------------
+B3-1: Explain without an index
+------------------------------------------------------------
+db.movies.find({ genre: "Drama", rating: { $gte: 8 } }).explain("executionStats")
+
+------------------------------------------------------------
+B3-2: Create compound index in the right order (genre first, rating second)
+------------------------------------------------------------
+db.movies.createIndex({ genre: 1, rating: -1 })
+
+db.movies.find({ genre: "Drama", rating: { $gte: 8 } }).explain("executionStats")
+
+------------------------------------------------------------
+B3-3: Compare with a poorly ordered index
+------------------------------------------------------------
+db.movies.createIndex({ rating: 1, genre: 1 })
+
+db.movies.find({ genre: "Drama", rating: { $gte: 8 } }).hint({ genre: 1, rating: -1 }).explain("executionStats")
+
+db.movies.find({ genre: "Drama", rating: { $gte: 8 } }).hint({ rating: 1, genre: 1 }).explain("executionStats")
+
+------------------------------------------------------------
+B3-4: Drop the poorly ordered index
+------------------------------------------------------------
+db.movies.dropIndex({ rating: 1, genre: 1 })
+
+------------------------------------------------------------
+B3-5: Multikey index on cast
+------------------------------------------------------------
+db.movies.createIndex({ cast: 1 })
+
+db.movies.find({ cast: "Asha" })
+
+db.movies.find({ cast: "Asha" }).explain("executionStats")
+
+------------------------------------------------------------
+B3-6: Hide and unhide the compound index
+------------------------------------------------------------
+db.movies.hideIndex("genre_1_rating_-1")
+
+db.movies.find({ genre: "Drama", rating: { $gte: 8 } }).explain("executionStats")
+
+db.movies.unhideIndex("genre_1_rating_-1")
+
+------------------------------------------------------------
+B3-7: Same index with a custom name (error) and list indexes
+------------------------------------------------------------
+db.movies.createIndex({ genre: 1, rating: -1 }, { name: "my_custom_index" })
+
+db.movies.getIndexes()
+
+
+############################################################
+SCENARIO B4: TICKET BOOKING - BACKUP, RESTORE AND DISASTER RECOVERY
+Database / Collection: ticketDB.bookings
+############################################################
+
+------------------------------------------------------------
+B4-SETUP: Connect and insert data
+------------------------------------------------------------
+mongosh "mongodb+srv://cluster0.mo5zhuy.mongodb.net/" --apiVersion 1 --username 2024pceacrmayank30_db_user
+
+use ticketDB
+
+db.bookings.insertMany([
+  { _id: 1, passenger: "Anand",   route: "Chennai-Madurai",    seats: 2 },
+  { _id: 2, passenger: "Bhuvana", route: "Chennai-Coimbatore", seats: 1 },
+  { _id: 3, passenger: "Chandru", route: "Madurai-Trichy",     seats: 3 },
+  { _id: 4, passenger: "Divya",   route: "Salem-Chennai",      seats: 1 },
+  { _id: 5, passenger: "Elango",  route: "Chennai-Trichy",     seats: 2 }
+])
+
+------------------------------------------------------------
+B4-1: Take a full backup of the replica set (run in CMD)
+------------------------------------------------------------
+exit
+
+mongodump --uri="mongodb+srv://cluster0.mo5zhuy.mongodb.net/" --username="2024pceacrmayank30_db_user" --readPreference=secondary --oplog --out="C:\backups\ticket_full"
+
+(If Atlas rejects --oplog or --readPreference=secondary on a free-tier cluster,
+ remove that option and run the command again.)
+
+------------------------------------------------------------
+B4-2: Verify the backup files (run in CMD)
+------------------------------------------------------------
+dir C:\backups\ticket_full
+
+dir C:\backups\ticket_full\ticketDB
+
+------------------------------------------------------------
+B4-3: Simulate a disaster (drop the collection)
+------------------------------------------------------------
+mongosh "mongodb+srv://cluster0.mo5zhuy.mongodb.net/" --apiVersion 1 --username 2024pceacrmayank30_db_user
+
+use ticketDB
+
+db.bookings.drop()
+
+show collections
+
+db.bookings.countDocuments()
+
+------------------------------------------------------------
+B4-4: Restore only the bookings collection (run in CMD)
+------------------------------------------------------------
+exit
+
+mongorestore --uri="mongodb+srv://cluster0.mo5zhuy.mongodb.net/" --username="2024pceacrmayank30_db_user" --nsInclude="ticketDB.bookings" "C:\backups\ticket_full"
+
+------------------------------------------------------------
+B4-5: Verify the restored data
+------------------------------------------------------------
+mongosh "mongodb+srv://cluster0.mo5zhuy.mongodb.net/" --apiVersion 1 --username 2024pceacrmayank30_db_user
+
+use ticketDB
+
+db.bookings.countDocuments()
+
+db.bookings.find({}, { _id: 0 })
+
+------------------------------------------------------------
+B4-6: Disaster-recovery table and backup practices (written answer)
+------------------------------------------------------------
+Failure situation                 Recovery action
+-------------------------------   ---------------------------------------------------------
+Accidental deletion               Restore the collection from backup using mongorestore.
+Primary server failure            Replica set elects another member as primary (failover).
+Database corruption               Restore the database from a valid backup.
+Hardware failure                  Replace the hardware and restore the data from backup.
+Accidental data modification      Restore from backup, or use point-in-time recovery if available.
+
+Three good backup practices:
+1. Take regular backups.
+2. Store backup copies in a separate location or in the cloud.
+3. Test backup restoration regularly.
+
+END OF COMMANDS
